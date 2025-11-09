@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>EduMap — 에듀맵 (Kakao)</title>
+
+<!-- Chart.js (간단 비교 차트) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+  :root{--accent:#2b7cff;--muted:#6b7280;--card:#fff;--bg:#f4f6fb}
+  html,body,#app{height:100%;margin:0;font-family:Noto Sans KR,system-ui;background:var(--bg)}
+  .app{display:grid;grid-template-columns:360px 1fr;gap:14px;padding:14px}
+  .sidebar{background:var(--card);border-radius:12px;padding:14px;box-shadow:0 6px 18px rgba(30,41,59,0.06);overflow:auto}
+  .logo{font-weight:700;color:var(--accent);font-size:18px}
+  .search{display:flex;gap:8px;margin-top:8px}
+  .search input{flex:1;padding:8px;border-radius:8px;border:1px solid #e6eefb}
+  .btn{background:var(--accent);color:#fff;border:none;padding:8px 10px;border-radius:8px;cursor:pointer}
+  .card{background:var(--card);padding:12px;border-radius:10px;margin-top:12px}
+  #map{height:78vh;border-radius:12px;box-shadow:0 6px 18px rgba(30,41,59,0.06)}
+  .controls{display:flex;gap:8px;align-items:center}
+  .form-row{display:flex;gap:8px;margin-top:8px}
+  .form-row input, .form-row select, textarea{padding:8px;border-radius:8px;border:1px solid #eef2ff;width:100%}
+  .list{max-height:24vh;overflow:auto;margin-top:8px}
+  .list .item{display:flex;justify-content:space-between;padding:8px;border-radius:8px;border:1px solid #f1f5f9;background:#fff;margin-bottom:8px}
+  footer{font-size:12px;color:var(--muted);margin-top:8px}
+  @media(max-width:960px){.app{grid-template-columns:1fr;grid-auto-rows:auto 1fr} #map{height:56vh}}
+</style>
+</head>
+<body>
+  <div id="app" class="app">
+    <aside class="sidebar">
+      <div>
+        <div class="logo">EduMap · 에듀맵</div>
+        <div style="font-size:12px;color:var(--muted)">지도 위에서 교육 기회를 평등하게 — 공공/무료 강좌와 학원 정보를 비교하세요.</div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600">검색 / 필터</div>
+        <div class="search">
+          <input id="q" placeholder="지역명 또는 과목 입력 (예: 강남구 수학)">
+          <button id="searchBtn" class="btn">검색</button>
+        </div>
+        <div class="form-row">
+          <select id="subjectFilter"><option value="">과목 전체</option><option>수학</option><option>영어</option><option>과학</option><option>코딩</option></select>
+          <select id="priceFilter"><option value="">가격</option><option value="free">무료</option><option value="budget">&lt;50,000</option><option value="mid">&lt;150,000</option><option value="high">&gt;=150,000</option></select>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:600">등록 / 수정 (로컬 저장)</div>
+        </div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">누구나 앱에서 학원/프로그램을 등록하고 편집할 수 있습니다. (현재는 브라우저 localStorage에 저장)</div>
+
+        <div style="margin-top:8px">
+          <input id="name" placeholder="기관명 (예: ○○학원)">
+          <div class="form-row" style="margin-top:8px">
+            <input id="addr" placeholder="주소 (도로명)">
+            <input id="subject" placeholder="주요 과목 (콤마로 구분)">
+          </div>
+          <div class="form-row" style="margin-top:8px">
+            <input id="fee" placeholder="월 평균 수강료 (숫자, 원 단위 입력)"/>
+            <input id="lat" placeholder="위도 (예: 37.5665)"/>
+            <input id="lng" placeholder="경도 (예: 126.9780)"/>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="addBtn" class="btn">등록</button>
+            <button id="clearLocal" style="background:#f3f4f6;border:none;padding:8px;border-radius:8px;">로컬 초기화</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600">검색 결과</div>
+        <div class="list" id="resultList"></div>
+        <footer>초기 데이터는 공공데이터(서울·경기·교육부 등)에서 시도한 자동 로드 시도 후, 실패하면 샘플 데이터로 동작합니다.</footer>
+      </div>
+    </aside>
+
+    <main>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:700">지도 뷰</div>
+        <div style="display:flex;gap:8px">
+          <label><input type="checkbox" id="showCircles" checked/> 원형표시</label>
+          <label><input type="checkbox" id="showMarkers" checked/> 마커</label>
+        </div>
+      </div>
+      <div id="map"></div>
+
+      <div style="display:flex;gap:12px;margin-top:12px">
+        <div class="card" style="flex:1">
+          <div style="font-weight:600">지역 통계</div>
+          <div id="regionStats" style="margin-top:8px;color:var(--muted)">마커 클릭 시 통계 표시</div>
+        </div>
+        <div class="card" style="width:340px">
+          <div style="font-weight:600">지역 비교</div>
+          <div style="margin-top:8px">
+            <input id="regA" placeholder="지역 A (예: 종로구)"/>
+            <input id="regB" placeholder="지역 B (예: 강남구)" style="margin-top:8px"/>
+            <button id="compareBtn" class="btn" style="margin-top:8px">비교</button>
+            <canvas id="compChart" height="140" style="margin-top:8px"></canvas>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+<script>
+/* ================== 설정(수정포인트) ==================
+   - 카카오 앱키는 아래에 이미 반영되어 있습니다.
+   - 실제 공공데이터 API를 사용하려면 (data.go.kr 등) 서버사이드에서 API키를 숨기고 프록시하는 것을 권장합니다.
+==================================================== */
+
+/* === 이미 적용된 Kakao App Key (요청하신 값) === */
+const KAKAO_APPKEY = '7ce0e2d94a1930e724497b939562a74f';
+
+/* === 실데이터 엔드포인트(옵션) ===
+   예: 서울 열린데이터 CSV/JSON URL 또는 data.go.kr OpenAPI 엔드포인트
+   만약 서버에서 직접 OpenAPI 키를 보관하지 않으면 브라우저에서 바로 호출 시 CORS/인증 에러가 발생할 수 있음.
+   아래 예시는 시도해보고 실패하면 폴백(샘플 데이터) 합니다.
+*/
+const PUBLIC_DATA_SOURCES = [
+  // 서울 열린데이터 학원 교습소정보(웹페이지 기반): 파일 다운로드/CSV URL이 필요.
+  // 예: 'https://data.seoul.go.kr/.../seoul_academy.csv'  (실제 CSV URL로 교체 가능)
+  // 경기도 OpenAPI 등도 여기에 추가 가능
+];
+
+/* =================================================
+   기본 샘플 데이터 (공공데이터 로드 실패 시 사용)
+   실제 서비스 시는 서버에서 공공데이터를 정제하여 전달하세요.
+=================================================*/
+const SAMPLE = [
+  { id: 's1', name: '강남 수학 학원 A', lat:37.4979, lng:127.0276, addr:'강남구 역삼동', subjects:['수학'], fee:220000, source:'sample' },
+  { id: 's2', name: '종로 영어 스쿨', lat:37.572, lng:126.979, addr:'종로구 종로1가', subjects:['영어'], fee:90000, source:'sample' },
+  { id: 's3', name: '노원 학습지원센터', lat:37.6543, lng:127.0564, addr:'노원구 상계동', subjects:['수학'], fee:70000, source:'sample' },
+  { id: 's4', name: '마포 코딩 스터디', lat:37.5663, lng:126.9016, addr:'마포구 합정동', subjects:['코딩'], fee:85000, source:'sample' }
+];
+
+/* ============ 앱 상태 ============ */
+const state = {
+  map: null,
+  markers: [],       // kakao.maps.Marker
+  circles: [],       // kakao.maps.Circle
+  data: [],          // combined data (public + local)
+  localKey: 'edumap_local_entries',
+  infoOverlay: null,
+};
+
+/* ============ 유틸 ============ */
+function uid(){ return 'id_' + Math.random().toString(36).slice(2,9); }
+function fmtKRW(n){ if(!n && n!==0) return '-'; return n.toLocaleString() + '원'; }
+function subjectsToStr(arr){ return Array.isArray(arr) ? arr.join(', ') : (arr||''); }
+
+/* ============ 로컬 저장 관리 (사용자 등록/편집용) ============ */
+function loadLocal(){
+  try {
+    const raw = localStorage.getItem(state.localKey);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e){ console.error(e); return []; }
+}
+function saveLocal(list){
+  localStorage.setItem(state.localKey, JSON.stringify(list));
+}
+
+/* ============ 지도 초기화 ============ */
+function loadKakao(){
+  return new Promise((resolve)=>{
+    if (window.kakao && kakao.maps) return resolve();
+    const s = document.createElement('script');
+    s.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_APPKEY}&autoload=false`;
+    s.onload = () => {
+      kakao.maps.load(()=> resolve());
+    };
+    document.head.appendChild(s);
+  });
+}
+
+async function init(){
+  await loadKakao();
+  const mapContainer = document.getElementById('map');
+  state.map = new kakao.maps.Map(mapContainer, { center: new kakao.maps.LatLng(37.5665,126.9780), level: 7 });
+
+  // 인포오버레이 (공유)
+  state.infoOverlay = new kakao.maps.CustomOverlay({ yAnchor: 1.2 });
+
+  // 먼저 공공데이터 시도 로드 -> 실패시 샘플 사용 -> + local entries
+  await tryLoadPublicData();
+
+  // load local saved entries
+  const localEntries = loadLocal();
+  // if local entries exist, ensure id present
+  localEntries.forEach(e=>{ if(!e.id) e.id = uid(); });
+
+  // combine
+  state.data = [...state.data, ...localEntries];
+
+  renderAll();
+
+  // UI hooks
+  document.getElementById('searchBtn').onclick = onSearch;
+  document.getElementById('q').addEventListener('keydown', e=>{ if(e.key==='Enter') onSearch(); });
+  document.getElementById('addBtn').onclick = addEntryFromForm;
+  document.getElementById('clearLocal').onclick = ()=>{ if(confirm('로컬에 저장된 모든 사용자 등록 데이터를 삭제할까요?')){ localStorage.removeItem(state.localKey); location.reload(); } };
+  document.getElementById('showCircles').onchange = e=> toggleCircles(e.target.checked);
+  document.getElementById('showMarkers').onchange = e=> toggleMarkers(e.target.checked);
+  document.getElementById('compareBtn').onclick = onCompare;
+}
+
+/* ============ 공공데이터 로드 시도 (브라우저 -> CORS/인증 제약 있을 수 있음) ============ */
+async function tryLoadPublicData(){
+  // 시도 1: data.seoul.go.kr (파일 다운로드 URL이 명확하면 fetch 가능)
+  // 시도 2: data.go.kr OpenAPI (대개 인증키 필요하므로 서버 프록시 권장)
+  // 현재 데모는 public fetch 시도 후 실패하면 SAMPLE 사용.
+  let loaded = false;
+
+  // Example: attempt to fetch an example CSV/JSON URL (none provided by user).
+  // If you have a direct CSV/JSON URL, add to PUBLIC_DATA_SOURCES array above.
+  for (const url of PUBLIC_DATA_SOURCES){
+    try {
+      const res = await fetch(url);
+      if(!res.ok) continue;
+      // try parse as json or csv (simple)
+      const text = await res.text();
+      // if json:
+      try {
+        const json = JSON.parse(text);
+        // transform json to our data shape if needed
+        const transformed = transformPublicToInternal(json);
+        state.data = state.data.concat(transformed);
+        loaded = true;
+        break;
+      } catch(e){
+        // try CSV simple parse (header,text)
+        const rows = text.split('\n').map(r=>r.trim()).filter(Boolean);
+        if (rows.length>1){
+          const header = rows[0].split(',').map(h=>h.replace(/["']/g,'').trim());
+          const items = rows.slice(1).map(r=>{
+            const cols = r.split(',').map(c=>c.replace(/["']/g,'').trim());
+            const obj = {};
+            header.forEach((h,i)=> obj[h]=cols[i]||'');
+            return obj;
+          });
+          const transformed = items.map((it,idx)=>({
+            id: 'p_'+idx,
+            name: it['기관명'] || it['학원명'] || it['facility_nm'] || it['시설명'] || it.name || 'unknown',
+            addr: it['주소']||it['소재지']||'',
+            lat: parseFloat(it['lat']||it['위도']||it['WGS84_LAT'])||0,
+            lng: parseFloat(it['lng']||it['경도']||it['WGS84_LONG'])||0,
+            fee: parseInt(it['수강료']||it['수강료정보']||0)||0,
+            subjects: (it['교습과정명']||it['과목']||'').split('/').map(s=>s.trim()).filter(Boolean),
+            source:'public'
+          }));
+          state.data = state.data.concat(transformed);
+          loaded = true;
+          break;
+        }
+      }
+    } catch(e){
+      console.warn('public source fetch failed', url, e);
+      continue;
+    }
+  }
+
+  if(!loaded){
+    // fallback sample
+    state.data = SAMPLE.slice();
+  }
+}
+
+/* helper (샘플 변환자) */
+function transformPublicToInternal(json){ /* 사용자 환경에 맞게 변환 구현 가능 */ return []; }
+
+/* ============ 렌더링: 마커/원형/목록 ============ */
+function renderAll(){
+  clearMap();
+  renderMarkersAndCircles(state.data);
+  renderList(state.data);
+}
+
+function clearMap(){
+  state.markers.forEach(m=>m.setMap(null));
+  state.circles.forEach(c=>c.setMap(null));
+  state.markers=[]; state.circles=[];
+}
+
+function renderMarkersAndCircles(list){
+  list.forEach(item=>{
+    if(!item.lat || !item.lng) return;
+    // Marker
+    const marker = new kakao.maps.Marker({
+      position: new kakao.maps.LatLng(item.lat, item.lng),
+      map: document.getElementById('showMarkers').checked ? state.map : null,
+      title: item.name
+    });
+    marker.__itemId = item.id;
+    kakao.maps.event.addListener(marker, 'click', ()=> onMarkerClick(item, marker));
+    state.markers.push(marker);
+
+    // Circle styled by fee
+    const color = feeColor(item.fee);
+    const circle = new kakao.maps.Circle({
+      center: new kakao.maps.LatLng(item.lat, item.lng),
+      radius: 500 + (Math.min(200000, item.fee||0) / 1000), // fee 많을수록 반경 증가 (시각화용)
+      strokeWeight: 2,
+      strokeColor: color,
+      strokeOpacity: 0.8,
+      fillColor: color,
+      fillOpacity: 0.25,
+      map: document.getElementById('showCircles').checked ? state.map : null
+    });
+    state.circles.push(circle);
+  });
+}
+
+function feeColor(fee){
+  if(!fee) return '#2ecc71';
+  if (fee >= 150000) return '#e74c3c';
+  if (fee >= 80000)  return '#f39c12';
+  return '#2ecc71';
+}
+
+function onMarkerClick(item, marker){
+  const content = document.createElement('div');
+  content.style.padding='10px';
+  content.style.width='220px';
+  content.innerHTML = `
+    <div style="font-weight:700;margin-bottom:6px">${item.name}</div>
+    <div style="font-size:13px;color:#333">💸 ${fmtKRW(item.fee)} <br/>📍 ${item.addr||'-'} <br/>📚 ${subjectsToStr(item.subjects)}</div>
+    <div style="margin-top:8px;display:flex;gap:6px">
+      <button id="edit_${item.id}" style="flex:1;padding:6px;border-radius:6px;border:none;background:#f3f4f6;cursor:pointer">편집</button>
+      <button id="del_${item.id}" style="flex:1;padding:6px;border-radius:6px;border:none;background:#ffecec;cursor:pointer">삭제</button>
+    </div>
+  `;
+  state.infoOverlay.setContent(content);
+  state.infoOverlay.setPosition(marker.getPosition());
+  state.infoOverlay.setMap(state.map);
+
+  // 이벤트 위임(지연)
+  setTimeout(()=>{
+    const eb = document.getElementById(`edit_${item.id}`);
+    const db = document.getElementById(`del_${item.id}`);
+    if(eb) eb.onclick = ()=> beginEdit(item);
+    if(db) db.onclick = ()=> deleteEntry(item.id);
+  },50);
+}
+
+/* ============ 목록 렌더링 ============ */
+function renderList(list){
+  const cont = document.getElementById('resultList');
+  cont.innerHTML = '';
+  if(!list.length) { cont.innerHTML = '<div style="color:#999">등록된 정보가 없습니다.</div>'; return; }
+  list.forEach(it=>{
+    const el = document.createElement('div'); el.className='item';
+    el.innerHTML = `<div>
+      <div style="font-weight:600">${it.name}</div>
+      <div style="font-size:12px;color:#666">${it.addr||'-'} · ${subjectsToStr(it.subjects)} · ${fmtKRW(it.fee)}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <button style="padding:6px;border-radius:6px;border:none;background:#f3f4f6;cursor:pointer" onclick="focusOn('${it.id}')">지도에서 보기</button>
+      <button style="padding:6px;border-radius:6px;border:none;background:#fff0f0;color:#b32;cursor:pointer" onclick="deleteEntry('${it.id}')">삭제</button>
+    </div>`;
+    cont.appendChild(el);
+  });
+}
+
+/* ============ 검색 ============ */
+function onSearch(){
+  const q = (document.getElementById('q').value||'').trim().toLowerCase();
+  const subj = (document.getElementById('subjectFilter').value||'').trim();
+  const price = (document.getElementById('priceFilter').value||'').trim();
+
+  let res = state.data.filter(d=>{
+    let ok = true;
+    if (q) ok = ok && ((d.name||'').toLowerCase().includes(q) || (d.addr||'').toLowerCase().includes(q) || (subjectsToStr(d.subjects)||'').toLowerCase().includes(q));
+    if (subj) ok = ok && (Array.isArray(d.subjects) ? d.subjects.includes(subj) : (d.subjects||'').includes(subj));
+    if (price){
+      if (price === 'free') ok = ok && (!d.fee || d.fee===0);
+      if (price === 'budget') ok = ok && (d.fee && d.fee < 50000);
+      if (price === 'mid') ok = ok && (d.fee && d.fee < 150000);
+      if (price === 'high') ok = ok && (d.fee && d.fee >= 150000);
+    }
+    return ok;
+  });
+
+  renderList(res);
+  if (res.length>0 && res[0].lat && res[0].lng){
+    state.map.panTo(new kakao.maps.LatLng(res[0].lat,res[0].lng));
+    state.map.setLevel(5);
+  }
+}
+
+/* ============ 등록 / 편집 / 삭제 ============ */
+function addEntryFromForm(){
+  const name = document.getElementById('name').value.trim();
+  if(!name) return alert('기관명을 입력하세요.');
+  const addr = document.getElementById('addr').value.trim();
+  const subjects = (document.getElementById('subject').value||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const fee = parseInt((document.getElementById('fee').value||'').replace(/[^0-9]/g,'')) || 0;
+  const lat = parseFloat(document.getElementById('lat').value) || null;
+  const lng = parseFloat(document.getElementById('lng').value) || null;
+
+  const entry = { id: uid(), name, addr, subjects, fee, lat, lng, source:'user' };
+
+  // push to localStorage
+  const local = loadLocal();
+  local.push(entry);
+  saveLocal(local);
+
+  // add to state and render
+  state.data.push(entry);
+  renderAll();
+
+  // clear form
+  document.getElementById('name').value=''; document.getElementById('addr').value=''; document.getElementById('subject').value=''; document.getElementById('fee').value=''; document.getElementById('lat').value=''; document.getElementById('lng').value='';
+  alert('등록되었습니다. (로컬 저장) — 백엔드 연동 시 서버 DB에 저장되도록 변경하세요.');
+}
+
+function beginEdit(item){
+  // populate form with item data; when user presses 등록, we'll push new entry (simple approach)
+  document.getElementById('name').value = item.name || '';
+  document.getElementById('addr').value = item.addr || '';
+  document.getElementById('subject').value = (item.subjects||[]).join(',');
+  document.getElementById('fee').value = item.fee || '';
+  document.getElementById('lat').value = item.lat || '';
+  document.getElementById('lng').value = item.lng || '';
+  // remove the old entry on save to emulate edit (or you can implement an edit mode)
+  deleteEntry(item.id, /*noConfirm=*/true);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function deleteEntry(id, noConfirm){
+  if(!noConfirm && !confirm('삭제하시겠습니까?')) return;
+  // remove from state.data and localStorage if exists
+  state.data = state.data.filter(d=>d.id !== id);
+  const local = loadLocal().filter(d=>d.id !== id);
+  saveLocal(local);
+  renderAll();
+}
+
+/* ============ 포커스 on map ============ */
+function focusOn(id){
+  const it = state.data.find(d=>d.id===id);
+  if(!it) return alert('항목을 찾을 수 없습니다.');
+  if(it.lat && it.lng){
+    state.map.panTo(new kakao.maps.LatLng(it.lat,it.lng));
+    state.map.setLevel(4);
+    // open overlay: find marker
+    const marker = state.markers.find(m => m.__itemId === id);
+    if(marker) onMarkerClick(it, marker);
+  } else {
+    alert('위치 정보가 없습니다.');
+  }
+}
+
+/* ============ 토글 표시 ============ */
+function toggleCircles(on){
+  state.circles.forEach(c=> c.setMap(on ? state.map : null));
+}
+function toggleMarkers(on){
+  state.markers.forEach(m=> m.setMap(on ? state.map : null));
+}
+
+/* ============ 비교 차트 ============ */
+function onCompare(){
+  const a = (document.getElementById('regA').value||'').trim();
+  const b = (document.getElementById('regB').value||'').trim();
+  if(!a||!b) return alert('두 지역명을 입력하세요 (예: 종로구, 강남구)');
+  const ra = findByRegionName(a);
+  const rb = findByRegionName(b);
+  if(!ra || !rb) return alert('입력한 지역을 찾을 수 없습니다. (정확한 행정구/구명 필요할 수 있음)');
+  const ctx = document.getElementById('compChart').getContext('2d');
+  if(window._cmp) window._cmp.destroy();
+  window._cmp = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels:['평균 수강료','등록 학원 수(데모)'],
+      datasets:[
+        {label:ra.name, data:[ra.fee||0, countByRegion(ra.name)], backgroundColor:'rgba(43,124,255,0.7)'},
+        {label:rb.name, data:[rb.fee||0, countByRegion(rb.name)], backgroundColor:'rgba(243,156,18,0.7)'}
+      ]
+    },
+    options:{scales:{y:{beginAtZero:true}}}
+  });
+}
+
+function findByRegionName(name){
+  // try to find first entry whose addr or name contains the region name
+  return state.data.find(d=> (d.addr||'').includes(name) || (d.name||'').includes(name) || d.name.toLowerCase().includes(name.toLowerCase()));
+}
+function countByRegion(name){
+  const term = name.split(' ')[0];
+  return state.data.filter(d=> (d.addr||'').includes(term) || (d.name||'').includes(term) ).length;
+}
+
+/* ============ 실행 ============ */
+init();
+
+/* ============ 개발/배포 노트 ============
+1) 공공데이터 연동:
+   - data.go.kr (교육부/시도교육청), 서울 열린데이터(data.seoul.go.kr), 경기도 open API 등에서 학원 위치·수강료 데이터를 제공함.
+   - 브라우저에서 직접 호출하면 CORS나 인증 문제 발생 가능 → 안정적으로 하려면 백엔드(Express/Firebase 등)에서 OpenAPI 키로 fetch한 뒤 프론트에 전달하세요.
+   - 관련 데이터셋 예: "서울시 학원 교습소정보", "경기도_학원 현황", "학원교습소정보(교육부/NEIS)". (앱 기획서/데이터 출처는 아래에 첨부)
+
+2) 백엔드 전환 포인트(간단):
+   - POST /api/entry      : 사용자 등록 (DB 저장)
+   - GET  /api/regions    : 정제된 학원/프로그램 목록 (위도/경도 포함)
+   - PUT  /api/entry/:id  : 편집
+   - DELETE /api/entry/:id: 삭제
+   - 서버에서 정기적으로 공공데이터 파싱/정제해 DB에 적재하면 서비스 안정화 가능
+
+3) 추가 개선:
+   - 사용자 인증, 신고/신뢰도 시스템, 사진 업로드, 파일(노트) 공유 등
+   - Kakao 지도 클러스터러, 레이어(무료강좌 레이어), 강좌 캘린더 연동
+
+=========================================== */
+</script>
+</body>
+</html>
